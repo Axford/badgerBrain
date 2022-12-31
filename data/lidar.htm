@@ -1,0 +1,627 @@
+<html>
+
+<body>
+
+  <div id="container"></div>
+  <canvas id="canvas" width="700" height="700"></canvas>
+
+<script>
+
+var host = '';
+if (window.location.hostname == 'localhost') {
+  host = 'http://172.20.10.2/';
+}
+
+var numSegs = 72;
+
+var robotSegWidth = 10; // how many segments to evaluate for width of robot
+var minDist = 450;  // how close to get before changing direction
+
+var dists = new Array(numSegs);
+var finalLines = [];
+
+var w = 700, h =700;
+var cw = w/2, ch = h/2;
+
+var canvas = document.getElementById('canvas');
+
+
+function sqr(a) {
+  return a * a;
+}
+
+function vectorMag(v) {
+  return Math.sqrt(sqr(v[0]) + sqr(v[1]));
+}
+
+function vectorAng(v) {
+  return Math.atan2( v[1], v[0] );
+}
+
+function vectorMult(v, s) {
+  return [
+    v[0] * s,
+    v[1] * s
+  ];
+}
+
+function vectorAdd(v1,v2) {
+  return [
+    v1[0] + v2[0],
+    v1[1] + v2[1]
+  ];
+}
+
+function vectorSub(v1,v2) {
+  return [
+    v1[0] - v2[0],
+    v1[1] - v2[1]
+  ];
+}
+
+function vectorDot(v1,v2) {
+  return v1[0] * v2[0] + v1[1] * v2[1];
+}
+
+function angDist(a1,a2) {
+  var ad = Math.abs(a1-a2);
+  if (ad > Math.PI) ad = Math.PI*2 - ad;
+  return ad;
+}
+
+function randomPointIndex(exclude, dist) {
+  var i, d;
+  do {
+    i = Math.round(Math.random() * (dists.length-1));
+    d = Math.abs(i - exclude);
+    if ( d > dists.length/2) d = dists.length - d;
+  } while (i == exclude || d > dist);
+  return i;
+}
+
+function pointAng(i) {
+  //return radians((i + 0.5) * 360/numSegs - 90);
+  return radians((i + 0.5) * 360/numSegs);
+}
+
+// return catesian coordinates for a point
+function pointFromIndex(i) {
+  const ang = pointAng(i);
+  return [
+    dists[i] * Math.cos(ang),
+    dists[i] * Math.sin(ang)
+  ];
+}
+
+function distToLine(p, origin, norm) {
+  // calc vector from origin to p
+  var vp = [ p[0] - origin[0], p[1] - origin[1] ];
+
+  // calc d using dot product of vp into norm
+  var d = vp[0] * norm[0] + vp[1] * norm[1];
+
+  return Math.abs(d);
+}
+
+
+function drawPoint(p, style) {
+  var ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = style;
+  ctx.beginPath();
+  ctx.arc(cw + p[0]/10, ch + p[1]/10, 2, 0, 2 * Math.PI);
+  ctx.fill();
+}
+
+function drawLine(p1,p2, style) {
+  var ctx = canvas.getContext('2d');
+
+  ctx.strokeStyle = style;
+  ctx.beginPath();
+  ctx.moveTo(cw + p1[0]/10, ch + p1[1]/10);
+  ctx.lineTo(cw + p2[0]/10, ch + p2[1]/10);
+  ctx.stroke();
+}
+
+
+function calcDistToLine(i, p3, p3n, nl) {
+  // calc vector from p3 to point
+  var p = pointFromIndex(i);
+  var vp = vectorSub(p,p3);
+
+  // calc d using dot product of vp into p3n
+  var d = vectorDot(vp, p3n);
+
+  // abs
+  d = Math.abs(d);
+
+  // calc distance along normalised line from origin
+  var d2 = vectorDot(vp,nl);
+
+  return {d:d, d2:d2};
+}
+
+
+function extractLines() {
+  var mStart = window.performance.now();
+  // use RANSAC algorithm to find candidate lines
+
+  const rThreshold = 250;  // how close can line be to centre of robot
+  const numIterations = 500;
+  const inlierThreshold = 50;  // in millimeters
+  const scoreThreshold = 8;
+  const segThreshold = 200;
+
+  var lines = [];
+  finalLines = [];
+
+  // for xx iterations
+  for (var i=0; i<numIterations; i++) {
+    // pick two random points
+    //var i1 = randomPointIndex(-1);
+    var i1 = i % dists.length;
+    var i2 = randomPointIndex(i1, 20);
+
+    var p1 = pointFromIndex(i1);
+    var p2 = pointFromIndex(i2);
+
+    // normalised vector along the line
+    var nl = [ p2[0] - p1[0], p2[1]-p1[1] ];
+    var nlMag = vectorMag(nl);
+    nl[0] = nl[0] / nlMag;
+    nl[1] = nl[1] / nlMag;
+
+    //console.log(p1,p2);
+
+    // calc line equation
+    var theta = Math.atan2( nl[1], nl[0] );  // y, x
+    var r1 = vectorMag(p1);
+
+    var phi = vectorAng(p1);
+
+    var gamma = (Math.PI - theta) + phi;
+
+    var r = Math.sin(gamma) * r1;
+
+    if (r > rThreshold) {
+      var beta = phi + Math.PI/2 - gamma;
+
+      var p3 = [
+        r * Math.cos(beta),
+        r * Math.sin(beta)
+      ];
+      var p3Mag = vectorMag(p3);
+
+      // normalised vector to point on line
+      var p3n = [ p3[0] /p3Mag, p3[1] / p3Mag ];
+
+      // work out signed distance of starting points from p3 (line origin)
+      var p1d = vectorDot(vectorSub(p1,p3), nl);
+      var p2d = vectorDot(vectorSub(p2,p3), nl);
+
+      var minD = p1d;
+      var maxD = p1d;
+
+      var segLength = Math.abs(p2d - p1d);
+
+      var score = 0;
+
+      if (segLength > segThreshold) {
+        //console.log(r,beta, p3);
+
+        // determine if all other points are "on" the line
+        // calc distance to line from each point
+        // accept as inlier if within threshold
+
+        var a1 = pointAng(i1);
+        // positive sweep starting at i1+1
+        var j = i1+1;
+        var k = 0;
+        var skipped = 0;
+        do {
+          if (j >dists.length-1) j = 0;
+
+          if (j != i2) {
+            ds = calcDistToLine(j, p3, p3n, nl);
+
+            // "score" or quality of line is count of inliers
+            if (ds.d < inlierThreshold && skipped < 2) {
+              score++;
+
+              // update min/max distances
+              minD = Math.min(minD, ds.d2);
+              maxD = Math.max(maxD, ds.d2);
+            } else {
+              skipped++;
+            }
+          }
+
+          j++;
+          k++;
+        } while( k < dists.length/4 && skipped < 2);
+
+        // negative sweep starting at i1-1
+        j = i1-1;
+        k = 0;
+        skipped = 0;
+        do {
+          if (j < 0) j = dists.length-1;
+
+          if (j != i2) {
+            ds = calcDistToLine(j, p3, p3n, nl);
+
+            // "score" or quality of line is count of inliers
+            if (ds.d < inlierThreshold && skipped < 2) {
+              score++;
+
+              // update min/max distances
+              minD = Math.min(minD, ds.d2);
+              maxD = Math.max(maxD, ds.d2);
+            } else {
+              skipped++;
+            }
+          }
+
+          j++;
+          k++;
+        } while( k < dists.length/4 && skipped < 2);
+      }
+
+      // if score over threshold, then add to array of identified lines
+      if (score > scoreThreshold) {
+
+        // set p1 to be min point
+        var pMin = vectorAdd( vectorMult(nl, minD), p3);
+
+        // set p2 to be max point
+        var pMax = vectorAdd( vectorMult(nl, maxD), p3);
+
+        lines.push({
+          id: lines.length,
+          r: r,
+          i1:i1,
+          beta: beta,
+          nl: nl,
+          p: p3,
+          pNorm: p3n,
+          p1: p1,
+          p2: p2,
+          pMin:pMin,
+          pMax:pMax,
+          minD: minD,
+          maxD: maxD,
+          score: score
+        });
+      }
+
+    }
+  }
+
+  // sort lines based on score
+  // highest score at start of array
+  lines.sort(function(a, b) {
+    return b.score - a.score;
+  });
+
+
+  // prep array to track which points have been allocated to line candidates
+  var distAlloc = new Array(numSegs);
+  for (var i=0; i<distAlloc.length; i++) {
+    distAlloc[i] = -1;
+  }
+
+  // merge line candidates
+  for (var i=0; i<lines.length; i++) {
+    // alloc available points to this line and rescore
+    var score2 = 0;
+
+    var num1=0, num2=0, den1 =0, den2=0;
+
+    var regressionPoints = [];
+
+    for (j=0; j<dists.length;j++) {
+      if (distAlloc[j] < 0) {
+        ds = calcDistToLine(j, lines[i].p, lines[i].pNorm, lines[i].nl);
+
+        if (ds.d < inlierThreshold && (ds.d2 >= lines[i].minD && ds.d2<=lines[i].maxD)) {
+          score2++;
+          distAlloc[j] = lines[i].id;
+
+          //drawPoint(p, 'rgb(0,255,0)');
+
+          //regressionPoints.push({d: dists[j], a: pointAng(j)});
+        }
+      }
+    }
+
+    lines[i].score2 = score2;
+
+    if (score2 > scoreThreshold) {
+      finalLines.push(lines[i]);
+    }
+
+    /*
+    if (score2 > scoreThreshold) {
+
+      // do linear regression on regressionPoints
+      for (var j=0; j < regressionPoints.length; j++) {
+        var pj = regressionPoints[j];
+
+        num1 += sqr(pj.d) * Math.sin(2 * pj.a);
+        den1 += sqr(pj.d) * Math.cos(2 * pj.a);
+
+        for (var k=0; k<regressionPoints.length; k++) {
+          var pk = regressionPoints[k];
+
+          num2 += pj.d * pk.d * Math.cos(pj.a) * Math.sin(pk.a);
+          den2 += pj.d * pk.d * Math.cos(pj.a + pk.a);
+        }
+      }
+
+      var a = 0.5 * Math.atan2(
+        num1 - (2 * num2 / regressionPoints.length),
+        (den1 - (den2 / regressionPoints.length))
+      );
+
+      var r = 0;
+      for (var j=0; j < regressionPoints.length; j++) {
+        r += regressionPoints[j].d * Math.sin(regressionPoints[j].a - a);
+      }
+      r /= regressionPoints.length;
+
+      // convert to points
+      var normAng = a + Math.PI/2;
+
+      lines[i].p3 = [
+        r * Math.cos(normAng),
+        r * Math.sin(normAng)
+      ];
+
+      lines[i].p4 = [
+        lines[i].p3[0] - 1000 * Math.cos(a),
+        lines[i].p3[1] - 1000 * Math.sin(a)
+      ];
+
+      lines[i].p5 = [
+        lines[i].p3[0] + 1000 * Math.cos(a),
+        lines[i].p3[1] + 1000 * Math.sin(a)
+      ];
+
+      finalLines.push(lines[i]);
+    }
+    */
+
+  }
+
+  // sort once more
+  finalLines.sort(function(a, b) {
+    return b.score - a.score;
+  });
+
+  // identify contiguous segments along each line
+
+
+  var mEnd = window.performance.now();
+
+  // colour label points to match their corresponding lines
+  // black if unmatched
+
+  // assign colour labels to finalLines
+  colorMap = {};
+  colorMap[-1] = 'hsl(0,0%,0%)';
+  for (var i = 0; i < finalLines.length; i++) {
+    var line  = finalLines[i];
+    line.color = 'hsl('+((i+1)*50)+',100%,50%)';
+    colorMap[line.id] = line.color;
+  }
+
+  // draw final set of lines
+  for (var i = 0; i < finalLines.length; i++) {
+    var line  = finalLines[i];
+
+    //drawPoint(line.p1, 'rgb(255,0,0)');
+    //drawPoint(line.p2, 'rgb(0,0,255)');
+
+    drawLine(line.pMin,line.pMax, line.color);
+
+    //drawPoint(line.pMin, 'rgb(255,255,0)');
+    //drawPoint(line.pMax, 'rgb(0,255,255)');
+
+    drawLine( [0,0], line.p, 'rgb(255,0,0)');
+
+    // regression fit
+    //drawPoint(line.p3, 'rgb(255,255,255)');
+    //drawLine( line.p4, line.p5, 'rgb(255,255,255)');
+
+  }
+
+  // draw colour points
+  for (var i=0; i<dists.length; i++) {
+    var p = pointFromIndex(i);
+    var c;
+    if (colorMap.hasOwnProperty(distAlloc[i])) {
+      c = colorMap[ distAlloc[i] ];
+    } else {
+      c = 'hsl(0,0%,0%)'
+    }
+
+    drawPoint(p, c);
+  }
+
+
+
+
+  console.log(mEnd-mStart);
+}
+
+function doGET(path, callback) {
+    var xhr = new XMLHttpRequest();
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState == 4) {
+            // The request is done; did it work?
+            if (xhr.status == 200) {
+                // ***Yes, use `xhr.responseText` here***
+                callback(xhr.responseText);
+            } else {
+                // ***No, tell the callback the call failed***
+                callback(null);
+            }
+        }
+    };
+    xhr.open("GET", path);
+    xhr.send();
+}
+
+function handleFileData(fileData) {
+    if (!fileData) {
+        // Show error
+        console.log('Error retriving LIDAR data')
+        return;
+    }
+
+    var distStr = fileData.split('\n');
+    // convert dists to floats
+    for (var i =0; i < dists.length; i++) {
+      if (distStr[i] != '') {
+        dists[i] = parseInt(distStr[i]);
+      }
+    }
+
+    drawLidar();
+
+    // look for lines in scan data
+    //extractLines();
+
+
+    setTimeout(fetchScan, 100);
+
+    //console.log(dists);
+}
+
+
+function radians(d) {
+  return d * Math.PI / 180;
+}
+
+function indexWithWrap(i) {
+  if (i >= numSegs) i-= numSegs;
+  if (i < 0) i += numSegs;
+  return i;
+}
+
+// determine the minimum distance within arcWidth radians, centred on centraAngle
+function minDistInArc(centreAngle, arcWidth) {
+  var arcWidthInSegs = Math.round(numSegs * arcWidth / 2 * Math.PI);
+  var startAng = centreAngle - arcWidth/2;
+  var endAng = centreAngle + arcWidth/2;
+
+  var startSeg = Math.round(numSegs * startAng / (2*Math.PI));
+  var endSeg = Math.round(numSegs * endAng / (2*Math.PI));
+
+  var minDist = dists[ indexWithWrap(startSeg) ];
+  for (var i = startSeg+1; i <= endSeg; i++) {
+    var index = indexWithWrap(i);
+    if (dists[index] < minDist) minDist = dists[index];
+  }
+  return minDist;
+}
+
+
+function drawLidar() {
+  if (canvas.getContext) {
+    var ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = 'rgb(0,0,0)';
+    ctx.fillRect(0,0,w,h);
+
+    // draw meter arcs
+    ctx.strokeStyle = 'rgb(100,100,100)';
+    for (var i =0; i<3; i++) {
+      ctx.beginPath();
+      ctx.arc(cw, ch, (i+1)*100, 0, 2*Math.PI, 0);
+      ctx.stroke();
+    }
+
+
+    ctx.fillStyle = 'rgb(0,64,0)';
+    for (var i =0; i < dists.length; i++) {
+      var startAngle = radians(i * 360/numSegs) ;
+      var endAngle = startAngle + radians(360/numSegs);
+
+      ctx.beginPath();
+      ctx.moveTo(cw,ch);
+      ctx.arc(cw, ch, dists[i]/10, startAngle, endAngle, 0);
+      ctx.fill();
+    }
+
+    // draw robot planning arc
+    var startAngle = -radians(robotSegWidth/2 * 360/numSegs) ;
+    var endAngle = radians(robotSegWidth/2 * 360/numSegs);
+
+    ctx.strokeStyle = 'rgb(255,255,255)';
+    ctx.beginPath();
+    ctx.arc(cw, ch, minDist/10, startAngle, endAngle, 0);
+    ctx.stroke();
+
+
+    // sweep around for min distances
+    var minAngDistFromCentre = 100;
+    var minAng = 0;
+
+    for (var i=0; i<numSegs; i++) {
+
+      var centreAng = radians(i * 360/numSegs);
+      var arcWidth =  2 * Math.PI * robotSegWidth / numSegs;
+
+      var angDistFromCentre = angDist(centreAng, 0);
+
+      var md = minDistInArc(centreAng, arcWidth);
+
+      if (md > minDist && angDistFromCentre < minAngDistFromCentre) {
+        minAngDistFromCentre = angDistFromCentre;
+        minAng = centreAng;
+      }
+
+      if (md < minDist) {
+        ctx.strokeStyle = 'rgb(255,0,0)';
+      } else {
+        ctx.strokeStyle = 'rgb(0,0,255)';
+      }
+      ctx.beginPath();
+      ctx.arc(cw, ch, md/10, centreAng-arcWidth/2, centreAng+arcWidth/2, 0);
+      ctx.stroke();
+    }
+
+    // draw direction selected
+    if (minAngDistFromCentre < 100) {
+      var x1 = cw + 100 * Math.cos(minAng);
+      var y1 = ch + 100 * Math.sin(minAng);
+
+      ctx.strokeStyle = 'rgb(0,255,0)';
+      ctx.beginPath();
+      ctx.moveTo(cw,ch);
+      ctx.lineTo(x1,y1);
+      ctx.stroke();
+    } else {
+      // no path available
+    }
+
+  }
+}
+
+
+function fetchScan() {
+  doGET(host + "get.dat", handleFileData);
+
+
+}
+
+
+
+fetchScan();
+
+
+</script>
+
+</body>
+<html>

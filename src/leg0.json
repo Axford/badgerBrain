@@ -1,0 +1,4 @@
+{"id":0,"coxaAngle":45,"coxaOffsets":[60,120,0],"boneLengths":[54,65,130],
+    "centres":[512,560,617], "invert":[false,true,true],
+    "deg45":[665,708,767],
+    "legMinAngles":[-90,-90,-55],"legMaxAngles":[90,115,170],"servoIDs":[2,4,6]}

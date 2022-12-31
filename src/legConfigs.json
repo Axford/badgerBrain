@@ -1,0 +1,39 @@
+{
+  "leg0": {"id":0,"coxaAngle":45,"coxaOffsets":[60,120,0],"boneLengths":[54,65,130],
+    "centres":[512,560,617], "invert":[false,true,true],
+    "deg45":[665,708,767],
+    "legMinAngles":[-90,-90,-55],"legMaxAngles":[90,115,170],"servoIDs":[2,4,6]}
+    ,
+
+  "leg1": {"id":1,"coxaAngle":0,"coxaOffsets":[100,0,0],"boneLengths":[54,65,130],
+    "centres":[505,562,614], "invert":[false,true,true],
+    "deg45":[664,709,762],
+    "legMinAngles":[-90,-90,-55],"legMaxAngles":[90,115,170],"servoIDs":[14,16,18]}
+    ,
+
+  "leg2": {"id":2,"coxaAngle":-45,"coxaOffsets":[60,-120,0],"boneLengths":[54,65,130],
+    "centres":[510,555,617], "invert":[false,true,true],
+    "deg45":[665,710,749],
+    "legMinAngles":[-90,-90,-55],"legMaxAngles":[90,115,170],"servoIDs":[8,10,12]}
+    ,
+
+
+
+  "leg3": {"id":3,"coxaAngle":-135,"coxaOffsets":[-60,-120,0],"boneLengths":[54,65,130],
+    "centres":[508,464,397], "invert":[false,false,false],
+    "deg45":[352,307,246],
+    "legMinAngles":[-90,-90,-55],"legMaxAngles":[90,115,170],"servoIDs":[7,9,11]}
+    ,
+
+  "leg4": {"id":4,"coxaAngle":-180,"coxaOffsets":[-100,0,0],"boneLengths":[54,65,130],
+    "centres":[508,463,399], "invert":[false,false,false],
+    "deg45":[356,312,253],
+    "legMinAngles":[-90,-90,-55],"legMaxAngles":[90,115,170],"servoIDs":[13,15,17]}
+    ,
+
+  "leg5": {"id":5,"coxaAngle":135,"coxaOffsets":[-60,120,0],"boneLengths":[54,65,130],
+    "centres":[507,462,400], "invert":[false,false,false],
+    "deg45":[356,308,255],
+    "legMinAngles":[-90,-90,-55],"legMaxAngles":[90,115,170],"servoIDs":[1,3,5]}
+
+}
